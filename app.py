@@ -9,7 +9,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
 # =========================================================================
-# 1. 웹 페이지 기본 스타일 및 레이아웃 설정 (너비 최대화)
+# 1. 웹 페이지 기본 스타일 및 반응형 레이아웃 설정
 # =========================================================================
 st.set_page_config(
     page_title="PROPTY - AI 부동산 시세 분석 엔진", 
@@ -17,23 +17,22 @@ st.set_page_config(
     layout="wide" 
 )
 
-# 모바일 가독성 향상을 위한 마진 및 버튼 스타일 최적화
+# 📱 반응형 분기점 CSS 적용
+# 화면 너비가 800px 이하(모바일)일 때는 사이드바를 아예 숨겨버리고 메인 홈에 집중시킵니다.
 st.html("""
 <style>
-    .main .block-container { 
-        padding-top: 1.5rem; 
-        padding-bottom: 2rem;
-    } 
-    .stButton>button { 
-        width: 100%; 
-        border-radius: 8px; 
-        font-weight: bold; 
-        height: 3rem;
-        font-size: 16px !important;
-    } 
-    div[data-testid='stMetricValue'] { 
-        font-size: 26px; 
-        font-weight: 700; 
+    .main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; height: 3rem; }
+    div[data-testid='stMetricValue'] { font-size: 26px; font-weight: 700; }
+    
+    /* 모바일 기기(화면 폭 800px 이하)일 때 Streamlit의 사이드바 자체를 보이지 않도록 처리 */
+    @media (max-width: 800px) {
+        section[data-testid="stSidebar"] {
+            display: none !important;
+        }
+        span[data-testid="collapsedControl"] {
+            display: none !important;
+        }
     }
 </style>
 """)
@@ -64,7 +63,7 @@ REGION_GROUPS = {
 }
 
 # =========================================================================
-# 2. 백엔드 AI 모델 멀티 학습 로직 (초고속 예외 처리 적용)
+# 2. 백엔드 AI 모델 멀티 학습 로직
 # =========================================================================
 @st.cache_resource(show_spinner="전체 행정구역 시세 데이터 최적화 분석 중...")
 def train_multi_models():
@@ -141,93 +140,25 @@ def train_multi_models():
 svm_city, svm_detail, knn_city, knn_detail, scaler, df_total = train_multi_models()
 
 # =========================================================================
-# 3. 메인 화면 상단 배치 - 조건 입력 구역 (사이드바 완전 폐지)
+# 3. 반응형 제어 - 세션 상태를 이용한 모바일 기기 감지 및 입력 위젯 스위칭
 # =========================================================================
-st.subheader("⚙️ 매물 조건 입력")
+# Streamlit의 쿼리 파라미터를 사용해 모바일 뷰 강제 전환 테스트용 파라미터 마련 (?device=mobile)
+query_params = st.query_params
+is_mobile = query_params.get("device", "pc") == "mobile"
 
-# 모바일에서도 뚱뚱하게 겹치지 않게 가로 배치(PC) 및 세로 자동 대응(모바일)하는 칼럼 레이아웃
-col1, col2, col3 = st.columns([1.2, 1.8, 1.5])
+# 모바일 전용 토글 위젯 (화면 우측 상단 배치로 유연성 증대)
+col_head, col_switch = st.columns([4, 1])
+with col_switch:
+    device_mode = st.toggle("📱 모바일 화면 모드", value=is_mobile)
 
-with col1:
-    home_type = st.selectbox("🏠 주택 유형", ['아파트', '오피스텔', '연립다세대', '단독주택'])
-with col2:
-    area = st.slider("📐 공급/전용 면적 (평수)", min_value=5, max_value=100, value=34, step=1)
-with col3:
-    price_per_pyeong = st.number_input("💰 희망 평당 가격 (만 원)", min_value=100, max_value=15000, value=4000, step=50)
+# --- 입력 데이터 허브 설정 ---
+home_type, area, price_per_pyeong, selected_model = None, None, None, None
+submit_btn = False
 
-st.markdown(" ")
-
-# 알고리즘 선택 및 실행 버튼 구역
-col_algo, col_btn = st.columns([2.5, 1.5])
-
-with col_algo:
-    selected_model = st.radio(
-        "🧠 AI 분석 엔진 선택",
-        ["SVM (곡선 경계 방식)", "KNN (최근린 이웃 방식)"],
-        horizontal=True,  # 모바일 환경에서 한눈에 들어오도록 가로 배치 설정
-    )
-with col_btn:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True) # 버튼 상단 맞춤용 공백
-    submit_btn = st.button("🔮 실시간 시세 판정 시작", type="primary")
-
-st.markdown("---")
-
-# =========================================================================
-# 4. 결과 출력 영역 (입력창 바로 밑에 렌더링)
-# =========================================================================
-if submit_btn:
-    type_code = df_total[df_total['home_type'] == home_type]['home_type_encoded'].iloc[0]
-    input_scaled = scaler.transform([[area, price_per_pyeong, type_code]])
-    
-    if "SVM" in selected_model:
-        active_city_model = svm_city
-        active_detail_model = svm_detail
-    else:
-        active_city_model = knn_city
-        active_detail_model = knn_detail
-    
-    pred_city = active_city_model.predict(input_scaled)[0]
-    probs_city = active_city_model.predict_proba(input_scaled)[0]
-    seoul_idx = np.where(active_city_model.classes_ == '서울')[0][0]
-    suwon_idx = np.where(active_city_model.classes_ == '수원')[0][0]
-    
-    seoul_prob = probs_city[seoul_idx] * 100
-    suwon_prob = probs_city[suwon_idx] * 100
-    
-    st.markdown(f"### 📍 판정 조건: `{home_type}` / `{area}평` / `평당 {price_per_pyeong:,}만 원`")
-    st.caption(f"**활성화 알고리즘:** {selected_model}")
-    
-    # 📌 메트릭 보드 (모바일 화면에 맞춰 3칸으로 분할)
-    m_col1, m_col2, m_col3 = st.columns(3)
+if device_mode:
+    # 📱 [모바일 모드 활성화 시] : 메인 홈 화면 최상단에 위젯 강제 노출
+    st.subheader("⚙️ 모바일용 매물 조건 입력")
+    m_col1, m_col2 = st.columns(2)
     with m_col1:
-        st.metric(label="🏢 최종 판정 결과", value=f"{pred_city} 지역 군집", delta="확정 완료")
-    with m_col2:
-        st.metric(label="🔴 서울 시세 동질성", value=f"{seoul_prob:.1f} %", delta=f"{'+' if pred_city=='서울' else ''}{seoul_prob-50:.1f}%", delta_color="normal" if pred_city=='서울' else "inverse")
-    with m_col3:
-        st.metric(label="🔵 수원 시세 동질성", value=f"{suwon_prob:.1f} %", delta=f"{'+' if pred_city=='수원' else ''}{suwon_prob-50:.1f}%", delta_color="normal" if pred_city=='수원' else "inverse")
-        
-    st.markdown("---")
-    
-    tab1, tab2 = st.tabs(["🎯 8대 구역 비교 리포트", "📂 분석 기초 데이터 테이블"])
-    
-    with tab1:
-        probs_detail = active_detail_model.predict_proba(input_scaled)[0]
-        detail_df = pd.DataFrame({
-            '세부 행정구역': active_detail_model.classes_,
-            '시세 유사도 (%)': probs_detail * 100
-        }).sort_values(by='시세 유사도 (%)', ascending=False).reset_index(drop=True)
-        
-        top_region = detail_df.loc[0, '세부 행정구역']
-        top_prob = detail_df.loc[0, '시세 유사도 (%)']
-        
-        st.info(f"💡 **정밀 해석:** 본 매물은 8대 세부 권역 중 **[{top_region}]**의 시세 형성 패턴과 가장 강력하게 겹쳐져 있습니다. (유사도 {top_prob:.1f}%)")
-        st.write("#### 📊 서울 25개 자치구 통합 8대 권역별 시세 스펙트럼")
-        st.bar_chart(data=detail_df, x='세부 행정구역', y='시세 유사도 (%)')
-        
-    with tab2:
-        st.write("#### 🗂️ 다중 레이어 매칭 원천 데이터 리포트")
-        st.dataframe(detail_df, use_container_width=True, hide_index=True)
-        st.caption(f"※ 총 {len(df_total):,}개의 실거래 샘플을 바탕으로 도출되었습니다.")
-
-else:
-    st.info("💡 위의 입력창에서 분석 조건과 원하는 AI 알고리즘을 선택한 뒤 **[실시간 시세 판정 시작]** 버튼을 터치해 주세요.")
+        home_type = st.selectbox("🏠 주택 유형", ['아파트', '오피스텔', '연립다세대', '단독주택'], key="m_type")
+        price_per_pyeong = st.number_input("💰 희망 평
