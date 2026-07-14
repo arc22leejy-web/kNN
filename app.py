@@ -13,10 +13,10 @@ from sklearn.preprocessing import StandardScaler
 st.set_page_config(
     page_title="PROPTY - AI 부동산 시세 분석 엔진", 
     page_icon="🔮",
-    layout="wide" # 화면을 넓게 써서 대시보드 느낌 극대화
+    layout="wide" 
 )
 
-# 🛠️ [에러 해결 포인트] 파이썬 버전별 줄바꿈 호환성 문제를 피하기 위해 st.html 내부에 한 줄로 CSS 주입
+# 🛠️ 파이썬 버전별 줄바꿈 호환성 문제를 피하기 위해 st.html 내부에 한 줄로 CSS 주입
 st.html("<style>.main .block-container { padding-top: 2rem; } .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; } div[data-testid='stMetricValue'] { font-size: 28px; font-weight: 700; }</style>")
 
 # 헤더 영역
@@ -42,42 +42,48 @@ REGION_MAP = {
 TARGET_REGIONS = list(REGION_MAP.keys())
 
 # =========================================================================
-# 2. 백엔드 AI 모델 멀티 학습 로직
+# 2. 백엔드 AI 모델 멀티 학습 로직 (고속 예외 처리 반영)
 # =========================================================================
 @st.cache_resource
 def train_multi_models():
     integrated_data = []
     current_date = datetime.now()
-    TARGET_MONTHS = [current_date.strftime("%Y%m"), (current_date - timedelta(days=30)).strftime("%Y%m")]
+    # 최근 1달 데이터만 타겟으로 잡아 API 요청 속도 향상
+    TARGET_MONTHS = [current_date.strftime("%Y%m")]
     
     for home_type, base_url in API_CONFIGS.items():
         for lawd_cd in TARGET_REGIONS:
             for deal_ymd in TARGET_MONTHS:
                 request_url = f"{base_url}?serviceKey={ENCODING_KEY}"
-                params = {'LAWD_CD': lawd_cd, 'DEAL_YMD': deal_ymd, 'numOfRows': '300'}
+                params = {'LAWD_CD': lawd_cd, 'DEAL_YMD': deal_ymd, 'numOfRows': '100'}
                 try:
-                    response = requests.get(request_url, params=params, timeout=5)
+                    # ⚠️ [무한 로딩 해결] 타임아웃을 1.5초로 줄여 서버가 무응답일 때 빠르게 포기하도록 설정
+                    response = requests.get(request_url, params=params, timeout=1.5)
                     if response.status_code == 200:
                         root = ET.fromstring(response.content)
-                        for item in root.findall('.//item'):
-                            try:
-                                amount = int(item.find('거래금액').text.strip().replace(',', ''))
-                                area_m2 = float(item.find('연면적').text.strip()) if home_type == '단독주택' else float(item.find('전용면적').text.strip())
-                                area_pyeong = round(area_m2 / 3.3058, 1)
-                                price_per_pyeong = round(amount / area_pyeong, 0)
-                                city_label = '서울' if '서울' in REGION_MAP[lawd_cd] else '수원'
-                                
-                                integrated_data.append({
-                                    'city': city_label, 'detail_region': REGION_MAP[lawd_cd],
-                                    'home_type': home_type, 'area_pyeong': area_pyeong, 'price_per_pyeong': price_per_pyeong
-                                })
-                            except: continue
-                except: continue
+                        # 정상적인 XML 아이템이 포함되어 있는지 검증
+                        if root.find('.//item') is not None:
+                            for item in root.findall('.//item'):
+                                try:
+                                    amount = int(item.find('거래금액').text.strip().replace(',', ''))
+                                    area_m2 = float(item.find('연면적').text.strip()) if home_type == '단독주택' else float(item.find('전용면적').text.strip())
+                                    area_pyeong = round(area_m2 / 3.3058, 1)
+                                    price_per_pyeong = round(amount / area_pyeong, 0)
+                                    city_label = '서울' if '서울' in REGION_MAP[lawd_cd] else '수원'
+                                    
+                                    integrated_data.append({
+                                        'city': city_label, 'detail_region': REGION_MAP[lawd_cd],
+                                        'home_type': home_type, 'area_pyeong': area_pyeong, 'price_per_pyeong': price_per_pyeong
+                                    })
+                                except: continue
+                except Exception as e:
+                    # 에러나 타임아웃 발생 시 멈추지 않고 다음 루프로 통과
+                    continue
                 
     df = pd.DataFrame(integrated_data)
     
-    # API 데이터 미준비 시 세이프가드 시뮬레이션 데이터 빌드
-    if df.empty:
+    # 공공데이터포털 API가 막혔거나 동기화 대기 중일 때 즉시 대안 시뮬레이션 가동
+    if df.empty or len(df) < 10:
         sim_list = []
         for lawd_cd, r_name in REGION_MAP.items():
             city = '서울' if '서울' in r_name else '수원'
@@ -146,7 +152,7 @@ if submit_btn:
         
     st.markdown("---")
     
-    # 📌 BOTTOM: 깔끔하게 분리된 결과 탭(Tabs) 구조
+    # 📌 BOTTOM: 결과 탭(Tabs) 구조
     tab1, tab2 = st.tabs(["🎯 8대 구역 비교 리포트", "📂 분석 기초 데이터 테이블"])
     
     with tab1:
