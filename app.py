@@ -8,7 +8,7 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 
 # =========================================================================
-# 1. 웹 페이지 기본 스타일 및 레이아웃 설정 (스타일리시 UI 변경)
+# 1. 웹 페이지 기본 스타일 및 레이아웃 설정 (파이썬 3.14 호환 버전)
 # =========================================================================
 st.set_page_config(
     page_title="PROPTY - AI 부동산 시세 분석 엔진", 
@@ -16,14 +16,8 @@ st.set_page_config(
     layout="wide" # 화면을 넓게 써서 대시보드 느낌 극대화
 )
 
-# 깔끔한 폰트와 스타일을 위한 minimal CSS
-st.markdown("""
-    <style>
-    .main .block-container { padding-top: 2rem; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
-    div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 700; }
-    </style>
-""", unsafe_allowed_html=True)
+# 🛠️ [에러 해결 포인트] 파이썬 버전별 줄바꿈 호환성 문제를 피하기 위해 st.html 내부에 한 줄로 CSS 주입
+st.html("<style>.main .block-container { padding-top: 2rem; } .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; } div[data-testid='stMetricValue'] { font-size: 28px; font-weight: 700; }</style>")
 
 # 헤더 영역
 st.title("🔮 PROPTY : AI 입지 시세 추론 데이터 랩")
@@ -40,6 +34,7 @@ API_CONFIGS = {
     '단독주택': 'http://apis.data.go.kr/1613000/RTMSOBJSvc/getRTMSDataSvcSHTrade'
 }
 
+# 4:4 대칭 행정구역 매핑 설정
 REGION_MAP = {
     '11170': '서울_도심강북권', '11680': '서울_강남동남권', '11500': '서울_강서서남권', '11350': '서울_강동동북권',
     '41111': '수원_장안구', '41113': '수원_권선구', '41115': '수원_팔달구', '41117': '수원_영통구'
@@ -81,6 +76,7 @@ def train_multi_models():
                 
     df = pd.DataFrame(integrated_data)
     
+    # API 데이터 미준비 시 세이프가드 시뮬레이션 데이터 빌드
     if df.empty:
         sim_list = []
         for lawd_cd, r_name in REGION_MAP.items():
@@ -108,7 +104,7 @@ def train_multi_models():
 model_city, model_detail, scaler, df_total = train_multi_models()
 
 # =========================================================================
-# 3. 사이드바(Sidebar) 배치 - 조건 입력창 숨겨서 메인 화면 확보
+# 3. 사이드바(Sidebar) 배치 - 조건 입력 컨트롤러
 # =========================================================================
 with st.sidebar:
     st.header("⚙️ 매물 조건 입력")
@@ -122,13 +118,13 @@ with st.sidebar:
     submit_btn = st.button("🔮 실시간 시세 판정 시작", type="primary")
 
 # =========================================================================
-# 4. 메인 대시보드 뷰 화면 (비즈니스 서비스 스타일 리뉴얼)
+# 4. 메인 대시보드 뷰 영역
 # =========================================================================
 if submit_btn:
     type_code = df_total[df_total['home_type'] == home_type]['home_type_encoded'].iloc[0]
     input_scaled = scaler.transform([[area, price_per_pyeong, type_code]])
     
-    # AI 연산
+    # AI 엔진 예측 연산
     pred_city = model_city.predict(input_scaled)[0]
     probs_city = model_city.predict_proba(input_scaled)[0]
     seoul_idx = np.where(model_city.classes_ == '서울')[0][0]
@@ -137,7 +133,7 @@ if submit_btn:
     seoul_prob = probs_city[seoul_idx] * 100
     suwon_prob = probs_city[suwon_idx] * 100
     
-    # 📌 TOP 영역: 모던 대시보드 스타일 메트릭 스코어 카드
+    # 📌 TOP: 스코어보드 메트릭 카드 시각화
     st.markdown(f"### 📍 입력 조건 요약: `{home_type}` / `{area}평` / `평당 {price_per_pyeong:,}만 원`")
     
     m_col1, m_col2, m_col3 = st.columns(3)
@@ -150,7 +146,7 @@ if submit_btn:
         
     st.markdown("---")
     
-    # 📌 하단 영역: 깔끔하게 분류된 탭 구조 데이터 리포트
+    # 📌 BOTTOM: 깔끔하게 분리된 결과 탭(Tabs) 구조
     tab1, tab2 = st.tabs(["🎯 8대 구역 비교 리포트", "📂 분석 기초 데이터 테이블"])
     
     with tab1:
@@ -163,10 +159,10 @@ if submit_btn:
         top_region = detail_df.loc[0, '세부 행정구역']
         top_prob = detail_df.loc[0, '시세 유사도 (%)']
         
-        # 안내 알림창
+        # 인사이트 브리핑 창
         st.info(f"💡 **AI 입지 정밀 해석:** 본 매물은 8대 세부 권역 중 **[{top_region}]**의 시세 형성 메커니즘과 가장 강력하게 겹쳐져 있습니다. (유사도 {top_prob:.1f}%)")
         
-        # 깔끔한 내장 차트 가로 정렬 배치
+        # 가로형 바 차트 시각화
         st.write("#### 📊 8대 권역별 시세 유사 가중치 스펙트럼")
         st.bar_chart(data=detail_df, x='세부 행정구역', y='시세 유사도 (%)')
         
@@ -176,7 +172,7 @@ if submit_btn:
         st.caption("※ 본 데이터는 국토교통부 실거래 데이터셋을 바탕으로 RBF(라디얼 기반 함수) 커널 SVM 알고리즘을 통해 계산된 정밀 분류 확률 값입니다.")
 
 else:
-    # 첫 접속 시 나오는 디폴트 안내문 (랜딩 페이지 느낌)
+    # 최초 진입 시 랜딩 대시보드 가이드문
     st.info("👈 왼쪽 사이드바에서 주택의 유형, 면적, 가격을 설정한 뒤 **[실시간 시세 판정 시작]** 버튼을 눌러주세요.")
     st.markdown("""
         ### 🚀 서비스 활용 가이드
